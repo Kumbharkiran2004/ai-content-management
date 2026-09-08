@@ -8,7 +8,7 @@ app.use(cors());
 app.use(express.json());
 
 app.get("/", (req, res) => {
-  res.send("AI Content Management System Backend is Running!");
+  res.send("AI Content Management System Backend v2 is Running!");
 });
 
 const PORT = 5000;
