@@ -2,7 +2,7 @@ const express = require("express");
 const cors = require("cors");
 const dotenv = require("dotenv");
 const { MongoClient, ObjectId } = require("mongodb");
-const OpenAI = require("openai");
+const { GoogleGenAI } = require("@google/genai");
 
 dotenv.config();
 
@@ -17,9 +17,9 @@ const PORT = 5000;
 const client = new MongoClient(process.env.MONGODB_URI);
 let contentsCollection;
 
-// OpenAI
-const openai = new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY
+// Gemini
+const ai = new GoogleGenAI({
+    apiKey: process.env.GEMINI_API_KEY
 });
 
 // Connect to MongoDB
@@ -37,12 +37,12 @@ app.get("/", (req, res) => {
     res.json({
         message: "AI Content Management System Backend is Running!",
         database: "MongoDB",
-        ai: "OpenAI"
+        ai: "Google Gemini"
     });
 });
 
 // =========================
-// AI CONTENT GENERATOR
+// GEMINI AI CONTENT GENERATOR
 // =========================
 
 app.post("/api/ai/generate", async (req, res) => {
@@ -65,17 +65,17 @@ Tone: ${selectedTone}
 
 Requirements:
 - Write clear and engaging content.
-- Use a suitable title.
+- Include a suitable title.
 - Make the content useful and easy to understand.
 - Return only the generated content.
 `;
 
-        const response = await openai.responses.create({
-            model: "gpt-5.6",
-            input: prompt
+        const response = await ai.models.generateContent({
+            model: "gemini-2.5-flash",
+            contents: prompt
         });
 
-        const generatedContent = response.output_text;
+        const generatedContent = response.text;
 
         res.json({
             message: "AI content generated successfully",
@@ -86,7 +86,7 @@ Requirements:
         });
 
     } catch (error) {
-        console.error("AI Generation Error:", error);
+        console.error("Gemini Generation Error:", error);
 
         res.status(500).json({
             message: "Failed to generate AI content",
