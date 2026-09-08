@@ -2,6 +2,7 @@ const express = require("express");
 const cors = require("cors");
 const dotenv = require("dotenv");
 const { MongoClient, ObjectId } = require("mongodb");
+const OpenAI = require("openai");
 
 dotenv.config();
 
@@ -12,9 +13,14 @@ app.use(express.json());
 
 const PORT = 5000;
 
+// MongoDB
 const client = new MongoClient(process.env.MONGODB_URI);
-
 let contentsCollection;
+
+// OpenAI
+const openai = new OpenAI({
+    apiKey: process.env.OPENAI_API_KEY
+});
 
 // Connect to MongoDB
 async function connectDatabase() {
@@ -30,9 +36,68 @@ async function connectDatabase() {
 app.get("/", (req, res) => {
     res.json({
         message: "AI Content Management System Backend is Running!",
-        database: "MongoDB"
+        database: "MongoDB",
+        ai: "OpenAI"
     });
 });
+
+// =========================
+// AI CONTENT GENERATOR
+// =========================
+
+app.post("/api/ai/generate", async (req, res) => {
+    try {
+        const { topic, tone, contentType } = req.body;
+
+        if (!topic) {
+            return res.status(400).json({
+                message: "Topic is required"
+            });
+        }
+
+        const selectedTone = tone || "professional";
+        const selectedContentType = contentType || "blog post";
+
+        const prompt = `
+Create a ${selectedContentType} about "${topic}".
+
+Tone: ${selectedTone}
+
+Requirements:
+- Write clear and engaging content.
+- Use a suitable title.
+- Make the content useful and easy to understand.
+- Return only the generated content.
+`;
+
+        const response = await openai.responses.create({
+            model: "gpt-5.6",
+            input: prompt
+        });
+
+        const generatedContent = response.output_text;
+
+        res.json({
+            message: "AI content generated successfully",
+            topic,
+            tone: selectedTone,
+            contentType: selectedContentType,
+            content: generatedContent
+        });
+
+    } catch (error) {
+        console.error("AI Generation Error:", error);
+
+        res.status(500).json({
+            message: "Failed to generate AI content",
+            error: error.message
+        });
+    }
+});
+
+// =========================
+// MONGODB CRUD
+// =========================
 
 // Get all content
 app.get("/api/content", async (req, res) => {
@@ -43,6 +108,7 @@ app.get("/api/content", async (req, res) => {
             .toArray();
 
         res.json(contents);
+
     } catch (error) {
         res.status(500).json({
             message: "Failed to fetch content",
@@ -76,6 +142,7 @@ app.post("/api/content", async (req, res) => {
             id: result.insertedId,
             data: newContent
         });
+
     } catch (error) {
         res.status(500).json({
             message: "Failed to create content",
@@ -122,6 +189,7 @@ app.put("/api/content/:id", async (req, res) => {
         res.json({
             message: "Content updated successfully"
         });
+
     } catch (error) {
         res.status(500).json({
             message: "Failed to update content",
@@ -154,6 +222,7 @@ app.delete("/api/content/:id", async (req, res) => {
         res.json({
             message: "Content deleted successfully"
         });
+
     } catch (error) {
         res.status(500).json({
             message: "Failed to delete content",
@@ -162,7 +231,10 @@ app.delete("/api/content/:id", async (req, res) => {
     }
 });
 
-// Start server
+// =========================
+// START SERVER
+// =========================
+
 async function startServer() {
     try {
         await connectDatabase();
@@ -170,8 +242,13 @@ async function startServer() {
         app.listen(PORT, () => {
             console.log(`Server running on port ${PORT}`);
         });
+
     } catch (error) {
-        console.error("Database connection failed:", error.message);
+        console.error(
+            "Database connection failed:",
+            error.message
+        );
+
         process.exit(1);
     }
 }
