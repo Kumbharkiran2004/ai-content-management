@@ -87,6 +87,7 @@ Requirements:
 - Return only the generated content.
 `;
 
+        // Generate content using Gemini
         const response = await ai.models.generateContent({
             model: "gemini-3.1-flash-lite",
             contents: prompt
@@ -94,8 +95,31 @@ Requirements:
 
         const generatedContent = response.text;
 
-        res.json({
-            message: "AI content generated successfully",
+        // =========================
+        // SAVE AI CONTENT TO MONGODB
+        // =========================
+
+        const newContent = {
+            title: `${topic} - AI Generated Content`,
+            content: generatedContent,
+            topic: topic,
+            tone: selectedTone,
+            contentType: selectedContentType,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+            generatedBy: "Google Gemini"
+        };
+
+        const result =
+            await contentsCollection.insertOne(newContent);
+
+        // =========================
+        // SEND RESPONSE
+        // =========================
+
+        res.status(201).json({
+            message: "AI content generated and saved successfully",
+            id: result.insertedId,
             topic: topic,
             tone: selectedTone,
             contentType: selectedContentType,
