@@ -1,20 +1,179 @@
 const express = require("express");
 const cors = require("cors");
-require("dotenv").config();
+const dotenv = require("dotenv");
+const { MongoClient, ObjectId } = require("mongodb");
+
+dotenv.config();
 
 const app = express();
 
 app.use(cors());
 app.use(express.json());
 
-app.get("/", (req, res) => {
-  res.send("AI Content Management System Backend v2 is Running!");
-});
-
 const PORT = 5000;
 
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+const client = new MongoClient(process.env.MONGODB_URI);
+
+let contentsCollection;
+
+// Connect to MongoDB
+async function connectDatabase() {
+    await client.connect();
+
+    const db = client.db("ai_content_db");
+    contentsCollection = db.collection("contents");
+
+    console.log("MongoDB Connected Successfully!");
+}
+
+// Health check
+app.get("/", (req, res) => {
+    res.json({
+        message: "AI Content Management System Backend is Running!",
+        database: "MongoDB"
+    });
 });
 
-// Jenkins webhook test
+// Get all content
+app.get("/api/content", async (req, res) => {
+    try {
+        const contents = await contentsCollection
+            .find()
+            .sort({ createdAt: -1 })
+            .toArray();
+
+        res.json(contents);
+    } catch (error) {
+        res.status(500).json({
+            message: "Failed to fetch content",
+            error: error.message
+        });
+    }
+});
+
+// Create content
+app.post("/api/content", async (req, res) => {
+    try {
+        const { title, content } = req.body;
+
+        if (!title || !content) {
+            return res.status(400).json({
+                message: "Title and content are required"
+            });
+        }
+
+        const newContent = {
+            title,
+            content,
+            createdAt: new Date(),
+            updatedAt: new Date()
+        };
+
+        const result = await contentsCollection.insertOne(newContent);
+
+        res.status(201).json({
+            message: "Content created successfully",
+            id: result.insertedId,
+            data: newContent
+        });
+    } catch (error) {
+        res.status(500).json({
+            message: "Failed to create content",
+            error: error.message
+        });
+    }
+});
+
+// Update content
+app.put("/api/content/:id", async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { title, content } = req.body;
+
+        if (!ObjectId.isValid(id)) {
+            return res.status(400).json({
+                message: "Invalid content ID"
+            });
+        }
+
+        if (!title || !content) {
+            return res.status(400).json({
+                message: "Title and content are required"
+            });
+        }
+
+        const result = await contentsCollection.updateOne(
+            { _id: new ObjectId(id) },
+            {
+                $set: {
+                    title,
+                    content,
+                    updatedAt: new Date()
+                }
+            }
+        );
+
+        if (result.matchedCount === 0) {
+            return res.status(404).json({
+                message: "Content not found"
+            });
+        }
+
+        res.json({
+            message: "Content updated successfully"
+        });
+    } catch (error) {
+        res.status(500).json({
+            message: "Failed to update content",
+            error: error.message
+        });
+    }
+});
+
+// Delete content
+app.delete("/api/content/:id", async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        if (!ObjectId.isValid(id)) {
+            return res.status(400).json({
+                message: "Invalid content ID"
+            });
+        }
+
+        const result = await contentsCollection.deleteOne({
+            _id: new ObjectId(id)
+        });
+
+        if (result.deletedCount === 0) {
+            return res.status(404).json({
+                message: "Content not found"
+            });
+        }
+
+        res.json({
+            message: "Content deleted successfully"
+        });
+    } catch (error) {
+        res.status(500).json({
+            message: "Failed to delete content",
+            error: error.message
+        });
+    }
+});
+
+// Start server
+async function startServer() {
+    try {
+        await connectDatabase();
+
+        app.listen(PORT, () => {
+            console.log(`Server running on port ${PORT}`);
+        });
+    } catch (error) {
+        console.error("Database connection failed:", error.message);
+        process.exit(1);
+    }
+}
+
+startServer();
