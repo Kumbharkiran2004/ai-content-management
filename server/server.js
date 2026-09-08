@@ -13,26 +13,40 @@ app.use(express.json());
 
 const PORT = 5000;
 
-// MongoDB
+// =========================
+// MONGODB
+// =========================
+
 const client = new MongoClient(process.env.MONGODB_URI);
+
 let contentsCollection;
 
-// Gemini
+// =========================
+// GEMINI AI
+// =========================
+
 const ai = new GoogleGenAI({
     apiKey: process.env.GEMINI_API_KEY
 });
 
-// Connect to MongoDB
+// =========================
+// CONNECT TO MONGODB
+// =========================
+
 async function connectDatabase() {
     await client.connect();
 
     const db = client.db("ai_content_db");
+
     contentsCollection = db.collection("contents");
 
     console.log("MongoDB Connected Successfully!");
 }
 
-// Health check
+// =========================
+// HEALTH CHECK
+// =========================
+
 app.get("/", (req, res) => {
     res.json({
         message: "AI Content Management System Backend is Running!",
@@ -56,7 +70,9 @@ app.post("/api/ai/generate", async (req, res) => {
         }
 
         const selectedTone = tone || "professional";
-        const selectedContentType = contentType || "blog post";
+
+        const selectedContentType =
+            contentType || "blog post";
 
         const prompt = `
 Create a ${selectedContentType} about "${topic}".
@@ -67,11 +83,12 @@ Requirements:
 - Write clear and engaging content.
 - Include a suitable title.
 - Make the content useful and easy to understand.
+- Use proper grammar.
 - Return only the generated content.
 `;
 
         const response = await ai.models.generateContent({
-            model: "gemini-2.5-flash",
+            model: "gemini-3.6-flash",
             contents: prompt
         });
 
@@ -79,14 +96,17 @@ Requirements:
 
         res.json({
             message: "AI content generated successfully",
-            topic,
+            topic: topic,
             tone: selectedTone,
             contentType: selectedContentType,
             content: generatedContent
         });
 
     } catch (error) {
-        console.error("Gemini Generation Error:", error);
+        console.error(
+            "Gemini Generation Error:",
+            error
+        );
 
         res.status(500).json({
             message: "Failed to generate AI content",
@@ -96,10 +116,9 @@ Requirements:
 });
 
 // =========================
-// MONGODB CRUD
+// GET ALL CONTENT
 // =========================
 
-// Get all content
 app.get("/api/content", async (req, res) => {
     try {
         const contents = await contentsCollection
@@ -117,7 +136,10 @@ app.get("/api/content", async (req, res) => {
     }
 });
 
-// Create content
+// =========================
+// CREATE CONTENT
+// =========================
+
 app.post("/api/content", async (req, res) => {
     try {
         const { title, content } = req.body;
@@ -129,13 +151,16 @@ app.post("/api/content", async (req, res) => {
         }
 
         const newContent = {
-            title,
-            content,
+            title: title,
+            content: content,
             createdAt: new Date(),
             updatedAt: new Date()
         };
 
-        const result = await contentsCollection.insertOne(newContent);
+        const result =
+            await contentsCollection.insertOne(
+                newContent
+            );
 
         res.status(201).json({
             message: "Content created successfully",
@@ -151,10 +176,14 @@ app.post("/api/content", async (req, res) => {
     }
 });
 
-// Update content
+// =========================
+// UPDATE CONTENT
+// =========================
+
 app.put("/api/content/:id", async (req, res) => {
     try {
         const { id } = req.params;
+
         const { title, content } = req.body;
 
         if (!ObjectId.isValid(id)) {
@@ -169,16 +198,19 @@ app.put("/api/content/:id", async (req, res) => {
             });
         }
 
-        const result = await contentsCollection.updateOne(
-            { _id: new ObjectId(id) },
-            {
-                $set: {
-                    title,
-                    content,
-                    updatedAt: new Date()
+        const result =
+            await contentsCollection.updateOne(
+                {
+                    _id: new ObjectId(id)
+                },
+                {
+                    $set: {
+                        title: title,
+                        content: content,
+                        updatedAt: new Date()
+                    }
                 }
-            }
-        );
+            );
 
         if (result.matchedCount === 0) {
             return res.status(404).json({
@@ -198,7 +230,10 @@ app.put("/api/content/:id", async (req, res) => {
     }
 });
 
-// Delete content
+// =========================
+// DELETE CONTENT
+// =========================
+
 app.delete("/api/content/:id", async (req, res) => {
     try {
         const { id } = req.params;
@@ -209,9 +244,10 @@ app.delete("/api/content/:id", async (req, res) => {
             });
         }
 
-        const result = await contentsCollection.deleteOne({
-            _id: new ObjectId(id)
-        });
+        const result =
+            await contentsCollection.deleteOne({
+                _id: new ObjectId(id)
+            });
 
         if (result.deletedCount === 0) {
             return res.status(404).json({
@@ -240,7 +276,9 @@ async function startServer() {
         await connectDatabase();
 
         app.listen(PORT, () => {
-            console.log(`Server running on port ${PORT}`);
+            console.log(
+                `Server running on port ${PORT}`
+            );
         });
 
     } catch (error) {
