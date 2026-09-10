@@ -13,306 +13,392 @@ app.use(express.json());
 
 const PORT = 5000;
 
-// =========================
-// MONGODB
-// =========================
+// ===============================
+// ENVIRONMENT VARIABLES
+// ===============================
 
-const client = new MongoClient(process.env.MONGODB_URI);
+const MONGODB_URI = process.env.MONGODB_URI;
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+
+if (!MONGODB_URI) {
+  console.error("ERROR: MONGODB_URI is missing in .env");
+  process.exit(1);
+}
+
+if (!GEMINI_API_KEY) {
+  console.error("ERROR: GEMINI_API_KEY is missing in .env");
+  process.exit(1);
+}
+
+// ===============================
+// MONGODB
+// ===============================
+
+const mongoClient = new MongoClient(MONGODB_URI);
 
 let contentsCollection;
 
-// =========================
+// ===============================
 // GEMINI AI
-// =========================
+// ===============================
 
 const ai = new GoogleGenAI({
-    apiKey: process.env.GEMINI_API_KEY
+  apiKey: GEMINI_API_KEY,
 });
 
-// =========================
-// CONNECT TO MONGODB
-// =========================
+const GEMINI_MODEL = "gemini-3.1-flash-lite";
 
-async function connectDatabase() {
-    await client.connect();
-
-    const db = client.db("ai_content_db");
-
-    contentsCollection = db.collection("contents");
-
-    console.log("MongoDB Connected Successfully!");
-}
-
-// =========================
-// HEALTH CHECK
-// =========================
+// ===============================
+// ROOT ROUTE
+// ===============================
 
 app.get("/", (req, res) => {
-    res.json({
-        message: "AI Content Management System Backend is Running!",
-        database: "MongoDB",
-        ai: "Google Gemini"
-    });
+  res.json({
+    message: "AI Content Management System Backend is Running!",
+    ai: "Google Gemini",
+    model: GEMINI_MODEL,
+    status: "online",
+  });
 });
 
-// =========================
+// ===============================
+// GET ALL CONTENT
+// ===============================
+
+app.get("/api/content", async (req, res) => {
+  try {
+    const contents = await contentsCollection
+      .find({})
+      .sort({ createdAt: -1 })
+      .toArray();
+
+    res.json(contents);
+  } catch (error) {
+    console.error("GET CONTENT ERROR:", error);
+
+    res.status(500).json({
+      message: "Failed to fetch content",
+      error: error.message,
+    });
+  }
+});
+
+// ===============================
+// GET SINGLE CONTENT
+// ===============================
+
+app.get("/api/content/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    if (!ObjectId.isValid(id)) {
+      return res.status(400).json({
+        message: "Invalid content ID",
+      });
+    }
+
+    const content = await contentsCollection.findOne({
+      _id: new ObjectId(id),
+    });
+
+    if (!content) {
+      return res.status(404).json({
+        message: "Content not found",
+      });
+    }
+
+    res.json(content);
+  } catch (error) {
+    console.error("GET SINGLE CONTENT ERROR:", error);
+
+    res.status(500).json({
+      message: "Failed to fetch content",
+      error: error.message,
+    });
+  }
+});
+
+// ===============================
 // GEMINI AI CONTENT GENERATOR
-// =========================
+// ===============================
 
-app.post("/api/ai/generate", async (req, res) => {
-    try {
-        const { topic, tone, contentType } = req.body;
+app.post("/api/generate", async (req, res) => {
+  try {
+    const {
+      topic,
+      tone = "Friendly",
+      contentType = "Article",
+    } = req.body;
 
-        if (!topic) {
-            return res.status(400).json({
-                message: "Topic is required"
-            });
-        }
+    console.log("Generating Gemini content...");
+    console.log("Topic:", topic);
+    console.log("Tone:", tone);
+    console.log("Content Type:", contentType);
 
-        const selectedTone = tone || "professional";
+    if (!topic || !topic.trim()) {
+      return res.status(400).json({
+        message: "Topic is required",
+      });
+    }
 
-        const selectedContentType =
-            contentType || "blog post";
+    const prompt = `
+You are an expert AI content writer.
 
-        const prompt = `
-Create a ${selectedContentType} about "${topic}".
+Create high-quality content based on the following information.
 
-Tone: ${selectedTone}
+Topic:
+${topic}
+
+Tone:
+${tone}
+
+Content Type:
+${contentType}
 
 Requirements:
 - Write clear and engaging content.
-- Include a suitable title.
-- Make the content useful and easy to understand.
-- Use proper grammar.
-- Return only the generated content.
+- Match the requested tone.
+- Match the requested content type.
+- Do not mention that you are an AI.
+- Do not add unnecessary explanations.
+- Return only the final content.
 `;
 
-        // Generate content using Gemini
-        const response = await ai.models.generateContent({
-            model: "gemini-3.1-flash-lite",
-            contents: prompt
-        });
+    const response = await ai.models.generateContent({
+      model: GEMINI_MODEL,
+      contents: prompt,
+    });
 
-        const generatedContent = response.text;
+    const generatedText = response.text;
 
-        // =========================
-        // SAVE AI CONTENT TO MONGODB
-        // =========================
-
-        const newContent = {
-            title: `${topic} - AI Generated Content`,
-            content: generatedContent,
-            topic: topic,
-            tone: selectedTone,
-            contentType: selectedContentType,
-            createdAt: new Date(),
-            updatedAt: new Date(),
-            generatedBy: "Google Gemini"
-        };
-
-        const result =
-            await contentsCollection.insertOne(newContent);
-
-        // =========================
-        // SEND RESPONSE
-        // =========================
-
-        res.status(201).json({
-            message: "AI content generated and saved successfully",
-            id: result.insertedId,
-            topic: topic,
-            tone: selectedTone,
-            contentType: selectedContentType,
-            content: generatedContent
-        });
-
-    } catch (error) {
-        console.error(
-            "Gemini Generation Error:",
-            error
-        );
-
-        res.status(500).json({
-            message: "Failed to generate AI content",
-            error: error.message
-        });
+    if (!generatedText || !generatedText.trim()) {
+      throw new Error("Gemini returned empty content");
     }
+
+    const newContent = {
+      topic: topic.trim(),
+      tone,
+      contentType,
+      content: generatedText.trim(),
+      generatedBy: "Google Gemini",
+      model: GEMINI_MODEL,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+
+    const result = await contentsCollection.insertOne(newContent);
+
+    console.log("Gemini content generated successfully!");
+    console.log("Saved Content ID:", result.insertedId);
+
+    res.status(201).json({
+      message: "AI content generated and saved successfully",
+      content: {
+        _id: result.insertedId,
+        ...newContent,
+      },
+    });
+  } catch (error) {
+    console.error("GEMINI GENERATION ERROR:", error);
+
+    res.status(500).json({
+      message: "Gemini content generation failed",
+      error: error.message,
+    });
+  }
 });
 
-// =========================
-// GET ALL CONTENT
-// =========================
-
-app.get("/api/content", async (req, res) => {
-    try {
-        const contents = await contentsCollection
-            .find()
-            .sort({ createdAt: -1 })
-            .toArray();
-
-        res.json(contents);
-
-    } catch (error) {
-        res.status(500).json({
-            message: "Failed to fetch content",
-            error: error.message
-        });
-    }
-});
-
-// =========================
-// CREATE CONTENT
-// =========================
+// ===============================
+// CREATE CONTENT MANUALLY
+// ===============================
 
 app.post("/api/content", async (req, res) => {
-    try {
-        const { title, content } = req.body;
+  try {
+    const {
+      topic,
+      tone,
+      contentType,
+      content,
+    } = req.body;
 
-        if (!title || !content) {
-            return res.status(400).json({
-                message: "Title and content are required"
-            });
-        }
-
-        const newContent = {
-            title: title,
-            content: content,
-            createdAt: new Date(),
-            updatedAt: new Date()
-        };
-
-        const result =
-            await contentsCollection.insertOne(
-                newContent
-            );
-
-        res.status(201).json({
-            message: "Content created successfully",
-            id: result.insertedId,
-            data: newContent
-        });
-
-    } catch (error) {
-        res.status(500).json({
-            message: "Failed to create content",
-            error: error.message
-        });
+    if (!content) {
+      return res.status(400).json({
+        message: "Content is required",
+      });
     }
+
+    const newContent = {
+      topic: topic || "",
+      tone: tone || "",
+      contentType: contentType || "Article",
+      content,
+      generatedBy: "Manual",
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+
+    const result = await contentsCollection.insertOne(newContent);
+
+    res.status(201).json({
+      message: "Content created successfully",
+      content: {
+        _id: result.insertedId,
+        ...newContent,
+      },
+    });
+  } catch (error) {
+    console.error("CREATE CONTENT ERROR:", error);
+
+    res.status(500).json({
+      message: "Failed to create content",
+      error: error.message,
+    });
+  }
 });
 
-// =========================
+// ===============================
 // UPDATE CONTENT
-// =========================
+// ===============================
 
 app.put("/api/content/:id", async (req, res) => {
-    try {
-        const { id } = req.params;
+  try {
+    const { id } = req.params;
 
-        const { title, content } = req.body;
-
-        if (!ObjectId.isValid(id)) {
-            return res.status(400).json({
-                message: "Invalid content ID"
-            });
-        }
-
-        if (!title || !content) {
-            return res.status(400).json({
-                message: "Title and content are required"
-            });
-        }
-
-        const result =
-            await contentsCollection.updateOne(
-                {
-                    _id: new ObjectId(id)
-                },
-                {
-                    $set: {
-                        title: title,
-                        content: content,
-                        updatedAt: new Date()
-                    }
-                }
-            );
-
-        if (result.matchedCount === 0) {
-            return res.status(404).json({
-                message: "Content not found"
-            });
-        }
-
-        res.json({
-            message: "Content updated successfully"
-        });
-
-    } catch (error) {
-        res.status(500).json({
-            message: "Failed to update content",
-            error: error.message
-        });
+    if (!ObjectId.isValid(id)) {
+      return res.status(400).json({
+        message: "Invalid content ID",
+      });
     }
+
+    const {
+      topic,
+      tone,
+      contentType,
+      content,
+    } = req.body;
+
+    const updateData = {
+      updatedAt: new Date(),
+    };
+
+    if (topic !== undefined) {
+      updateData.topic = topic;
+    }
+
+    if (tone !== undefined) {
+      updateData.tone = tone;
+    }
+
+    if (contentType !== undefined) {
+      updateData.contentType = contentType;
+    }
+
+    if (content !== undefined) {
+      updateData.content = content;
+    }
+
+    const result = await contentsCollection.updateOne(
+      {
+        _id: new ObjectId(id),
+      },
+      {
+        $set: updateData,
+      }
+    );
+
+    if (result.matchedCount === 0) {
+      return res.status(404).json({
+        message: "Content not found",
+      });
+    }
+
+    res.json({
+      message: "Content updated successfully",
+    });
+  } catch (error) {
+    console.error("UPDATE CONTENT ERROR:", error);
+
+    res.status(500).json({
+      message: "Failed to update content",
+      error: error.message,
+    });
+  }
 });
 
-// =========================
+// ===============================
 // DELETE CONTENT
-// =========================
+// ===============================
 
 app.delete("/api/content/:id", async (req, res) => {
-    try {
-        const { id } = req.params;
+  try {
+    const { id } = req.params;
 
-        if (!ObjectId.isValid(id)) {
-            return res.status(400).json({
-                message: "Invalid content ID"
-            });
-        }
-
-        const result =
-            await contentsCollection.deleteOne({
-                _id: new ObjectId(id)
-            });
-
-        if (result.deletedCount === 0) {
-            return res.status(404).json({
-                message: "Content not found"
-            });
-        }
-
-        res.json({
-            message: "Content deleted successfully"
-        });
-
-    } catch (error) {
-        res.status(500).json({
-            message: "Failed to delete content",
-            error: error.message
-        });
+    if (!ObjectId.isValid(id)) {
+      return res.status(400).json({
+        message: "Invalid content ID",
+      });
     }
+
+    const result = await contentsCollection.deleteOne({
+      _id: new ObjectId(id),
+    });
+
+    if (result.deletedCount === 0) {
+      return res.status(404).json({
+        message: "Content not found",
+      });
+    }
+
+    res.json({
+      message: "Content deleted successfully",
+    });
+  } catch (error) {
+    console.error("DELETE CONTENT ERROR:", error);
+
+    res.status(500).json({
+      message: "Failed to delete content",
+      error: error.message,
+    });
+  }
 });
 
-// =========================
+// ===============================
 // START SERVER
-// =========================
+// ===============================
 
 async function startServer() {
-    try {
-        await connectDatabase();
+  try {
+    await mongoClient.connect();
 
-        app.listen(PORT, () => {
-            console.log(
-                `Server running on port ${PORT}`
-            );
-        });
+    console.log("MongoDB Connected Successfully!");
 
-    } catch (error) {
-        console.error(
-            "Database connection failed:",
-            error.message
-        );
+    const database = mongoClient.db("ai_content_management");
 
-        process.exit(1);
-    }
+    contentsCollection = database.collection("contents");
+
+    console.log("MongoDB Database Ready!");
+    console.log("Google Gemini AI Generator is Ready!");
+    console.log("Gemini Model:", GEMINI_MODEL);
+
+    app.listen(PORT, () => {
+      console.log(`Server running on port ${PORT}`);
+    });
+  } catch (error) {
+    console.error("SERVER START ERROR:", error);
+    process.exit(1);
+  }
 }
 
 startServer();
+
+// ===============================
+// GRACEFUL SHUTDOWN
+// ===============================
+
+process.on("SIGINT", async () => {
+  console.log("Shutting down server...");
+
+  await mongoClient.close();
+
+  process.exit(0);
+});
